@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flight Ticket Booking</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#eef3f9;color:#1b2a3a}
+  header{background:#0b3d91;color:#fff;padding:18px 24px;font-size:22px;font-weight:600}
+  main{max-width:900px;margin:20px auto;padding:0 14px}
+  .card{background:#fff;border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 1px 4px #0002}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  input,select,button{padding:10px;border:1px solid #b9c5d4;border-radius:6px;font-size:15px}
+  input{flex:1;min-width:140px}
+  button{background:#0b3d91;color:#fff;border:0;cursor:pointer}
+  button.red{background:#c62828}
+  .flight{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+  .price{font-size:20px;font-weight:700;color:#0b7a3b}
+  .muted{color:#667;font-size:13px}
+  #modal{display:none;position:fixed;inset:0;background:#0007;align-items:center;justify-content:center}
+  #modal .card{width:340px;margin:0}
+  #modal input{width:100%;margin-bottom:8px}
+  .msg{padding:10px;border-radius:6px;margin-bottom:10px;display:none}
+  .ok{background:#d8f3e2}.err{background:#fde0e0}
+</style>
+</head>
+<body>
+<header>✈ Flight Ticket Booking</header>
+<main>
+  <div class="card">
+    <h3>Search Flights</h3>
+    <div class="row">
+      <input id="from" placeholder="From (e.g. Madurai)">
+      <input id="to" placeholder="To (e.g. Chennai)">
+      <input id="date" type="date">
+      <button onclick="search()">Search</button>
+    </div>
+  </div>
+  <div id="msg" class="msg"></div>
+  <div id="results"></div>
+
+  <div class="card">
+    <h3>My Bookings</h3>
+    <div class="row">
+      <input id="lookup" type="email" placeholder="Enter your email">
+      <button onclick="loadBookings()">Show</button>
+    </div>
+    <div id="bookings" style="margin-top:12px"></div>
+  </div>
+</main>
+
+<div id="modal"><div class="card">
+  <h3>Book: <span id="mFlight"></span></h3>
+  <input id="pName" placeholder="Passenger name">
+  <input id="pEmail" type="email" placeholder="Email">
+  <input id="pSeats" type="number" min="1" value="1" placeholder="Seats">
+  <div class="row"><button onclick="confirmBooking()">Confirm</button>
+  <button class="red" onclick="closeModal()">Cancel</button></div>
+</div></div>
+
+<script>
+let selected = null;
+const fmt = d => new Date(d).toLocaleString([], {dateStyle:'medium', timeStyle:'short'});
+const money = n => '₹' + Number(n).toLocaleString('en-IN');
+
+function show(text, ok=true){
+  const m = document.getElementById('msg');
+  m.className = 'msg ' + (ok ? 'ok' : 'err'); m.textContent = text; m.style.display = 'block';
+}
+
+async function search(){
+  const p = new URLSearchParams({from: from.value, to: to.value, date: date.value});
+  const flights = await (await fetch('/api/flights?' + p)).json();
+  const box = document.getElementById('results');
+  if(!flights.length){ box.innerHTML = '<div class="card">No flights found.</div>'; return; }
+  box.innerHTML = flights.map(f => `
+    <div class="card flight">
+      <div><b>${f.airline}</b><br>${f.from} → ${f.to}<br>
+        <span class="muted">${fmt(f.departure)} · ${f.seats} seats left</span></div>
+      <div class="price">${money(f.price)}</div>
+      <button ${f.seats==0?'disabled':''} onclick='openModal(${JSON.stringify(f)})'>Book</button>
+    </div>`).join('');
+}
+
+function openModal(f){ selected = f; mFlight.textContent = `${f.from} → ${f.to}`; modal.style.display = 'flex'; }
+function closeModal(){ modal.style.display = 'none'; }
+
+async function confirmBooking(){
+  const res = await fetch('/api/bookings', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({flightId: selected.id, passengerName: pName.value, email: pEmail.value, seats: +pSeats.value})
+  });
+  const data = await res.json();
+  closeModal();
+  if(res.ok){ show(`Booking confirmed! Reference: ${data.reference} · Total ${money(data.total)}`); search(); lookup.value = pEmail.value; loadBookings(); }
+  else show(data.error || 'Booking failed', false);
+}
+
+async function loadBookings(){
+  const list = await (await fetch('/api/bookings?email=' + encodeURIComponent(lookup.value))).json();
+  bookings.innerHTML = list.length ? list.map(b => `
+    <div class="flight" style="border-top:1px solid #dde;padding:10px 0">
+      <div><b>${b.reference}</b> · ${b.passengerName}<br>${b.from} → ${b.to} (${b.airline})<br>
+        <span class="muted">${fmt(b.departure)} · ${b.seats} seat(s) · ${money(b.total)}</span></div>
+      <button class="red" onclick="cancelBooking(${b.id})">Cancel</button>
+    </div>`).join('') : '<span class="muted">No bookings found.</span>';
+}
+
+async function cancelBooking(id){
+  if(!confirm('Cancel this booking?')) return;
+  await fetch('/api/bookings/' + id, {method:'DELETE'});
+  show('Booking cancelled.'); loadBookings(); search();
+}
+search();
+</script>
+</body>
+</html>
